@@ -7,6 +7,7 @@ import android.os.AsyncTask;
 import android.os.Bundle;
 import android.util.Log;
 import android.view.View;
+import android.widget.AbsListView;
 import android.widget.AdapterView;
 import android.widget.ArrayAdapter;
 import android.widget.ListView;
@@ -29,15 +30,18 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 public class MainActivity extends AppCompatActivity {
+    private int numberOfNews = 0;
     private final String topNewsUrl = "https://hacker-news.firebaseio.com/v0/topstories.json";
     private final String newsAPIFormat = "https://hacker-news.firebaseio.com/v0/item/%s.json";
-    private HashMap<String, String> newsMap;
+    private ArrayList<String> newsTitles;
+    private ArrayList<String> newsUrls;
+    private ArrayAdapter<String> adapter;
 
     private class NewsIdTask extends AsyncTask<String, Void, String[]> {
 
         @Override
         protected String[] doInBackground(String... urls) {
-            return  this.getNewsNums(this.getData(urls[0]));
+            return  this.getNewsIds(this.getData(urls[0]));
         }
 
         private String getData(String link) {
@@ -71,7 +75,7 @@ public class MainActivity extends AppCompatActivity {
             return  result;
         }
 
-        private String[] getNewsNums(String jsonString) {
+        private String[] getNewsIds(String jsonString) {
             Pattern pattern = Pattern.compile("([0-9]*),");
             Matcher matcher = pattern.matcher(jsonString);
             ArrayList<String> result = new ArrayList<>();
@@ -118,59 +122,78 @@ public class MainActivity extends AppCompatActivity {
 
     }
 
-
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
-        this.prepareNews();
+        newsTitles = new ArrayList<>();
+        newsUrls = new ArrayList<>();
+        this.prepareNewsListView();
+        this.prepareNews(10);
+
     }
 
-    private void prepareNews() {
+    private void prepareNews(int targetNumberOfNews) {
         NewsIdTask task = new NewsIdTask();
         try {
             String[] newsIds = task.execute(this.topNewsUrl).get();
             ArrayList<JSONObject> news = new ArrayList<>();
-
-            for (String id : newsIds) {
+            targetNumberOfNews = targetNumberOfNews < newsIds.length ? targetNumberOfNews : newsIds.length;
+            for (int i = this.numberOfNews; i < targetNumberOfNews; i++) {
+                String id = newsIds[i];
                 String api = String.format(this.newsAPIFormat, id);
                 NewsContentDownloadTask newsDownloadTask = new NewsContentDownloadTask();
                 news.add(newsDownloadTask.execute(api).get());
             }
-            prepareNewsList(news);
-        } catch (ExecutionException | InterruptedException e) {
+            this.numberOfNews = targetNumberOfNews;
+            this.prepareTitlesUrlsFromNews(news);
+        } catch (ExecutionException | InterruptedException | JSONException e) {
             e.printStackTrace();
         }
     }
 
-    private void prepareNewsList(final ArrayList<JSONObject> news) {
+    private void prepareNewsListView() {
         ListView listView = findViewById(R.id.listView);
-        try {
-            newsMap = this.getMapFromNews(news);
-            ArrayAdapter<String> adapter = new ArrayAdapter<>(this, android.R.layout.simple_list_item_1, newsMap.keySet().toArray(new String[0]));
-            listView.setAdapter(adapter);
 
-            listView.setOnItemClickListener(new AdapterView.OnItemClickListener() {
-                @Override
-                public void onItemClick(AdapterView<?> adapterView, View view, int i, long l) {
-                    Intent intent = new Intent(getApplicationContext(), WebBrowseActivity.class);
-                    intent.putExtra("url", newsMap.get(newsMap.keySet().toArray(new String[0])[i]));
-                    startActivity(intent);
+        adapter = new ArrayAdapter<>(this, android.R.layout.simple_list_item_1, newsTitles);
+        listView.setAdapter(adapter);
+
+        listView.setOnItemClickListener(new AdapterView.OnItemClickListener() {
+            @Override
+            public void onItemClick(AdapterView<?> adapterView, View view, int i, long l) {
+                Intent intent = new Intent(getApplicationContext(), WebBrowseActivity.class);
+                intent.putExtra("url", newsUrls.get(i));
+                startActivity(intent);
+            }
+        });
+
+        listView.setOnScrollListener(new AbsListView.OnScrollListener() {
+            @Override
+            public void onScrollStateChanged(AbsListView absListView, int i) {
+
+            }
+
+            @Override
+            public void onScroll(AbsListView absListView, int i, int i1, int i2) {
+                if (i + i1 == i2) {
+                    int numberOfNewsToAdd = 10;
+                    prepareNews(numberOfNews + numberOfNewsToAdd);
+                    Log.i("ListView", "Scrolled to the end");
                 }
-            });
-        } catch (JSONException e) {
-            e.printStackTrace();
-        }
+            }
+        });
+
     }
 
-    private HashMap<String, String> getMapFromNews(ArrayList<JSONObject> news) throws JSONException {
-        HashMap<String, String> result = new HashMap<>();
+    private void prepareTitlesUrlsFromNews(ArrayList<JSONObject> news) throws JSONException {
         for (JSONObject obj : news) {
             if (obj.has("title") && obj.has("url")) {
-                result.put((String) obj.get("title"), (String) obj.get("url"));
+                newsTitles.add(obj.getString("title"));
+                newsUrls.add(obj.getString("url"));
             }
         }
-        return result;
+        // Improves performance after moving out from the for loop
+        adapter.notifyDataSetChanged();
     }
 
 
